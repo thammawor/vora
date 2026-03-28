@@ -1,67 +1,145 @@
 <script lang="ts">
 	import { supabase } from '$lib/supabase';
-	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
+	import snarkdown from 'snarkdown';
 
 	let user = $state<any>(null);
+	let raw = $state('');
+	let isSaving = $state(false);
 
+	// ---------- Auth ----------
 	onMount(async () => {
-		// เช็คว่ามีคน Login อยู่ไหม
 		const { data } = await supabase.auth.getSession();
 		if (!data.session) {
-			goto('/login'); // ถ้าไม่มีให้เด้งไปหน้า Login
+			goto('/login');
 		} else {
 			user = data.session.user;
 		}
-	});
-	// สถานะของฟอร์ม
-	let title = $state('');
-	let slug = $state('');
-	let content = $state('');
-	let isSaving = $state(false);
 
+		// โหลด draft
+		const saved = localStorage.getItem('draft');
+		if (saved) raw = saved;
+	});
+
+	// ---------- Utils ----------
+	function slugify(text: string) {
+		return text
+			.toLowerCase()
+			.trim()
+			.replace(/\s+/g, '-')
+			.replace(/[^\w\-]+/g, '');
+	}
+
+	function parseMarkdown(raw: string) {
+		const lines = raw.trim().split('\n');
+
+		let title = '';
+		let content = raw;
+		let tags: string[] = [];
+
+		// ---------- TITLE ----------
+		if (lines[0].startsWith('# ')) {
+			title = lines[0].replace('# ', '').trim();
+		}
+
+		// ---------- TAGS ----------
+		const tagLine = lines.find((l) => l.startsWith('#Tags:'));
+
+		if (tagLine) {
+			tags = tagLine
+				.replace('#Tags:', '')
+				.split(',')
+				.map((t) => t.trim())
+				.filter(Boolean);
+
+			// ลบ tag ออกจาก content
+			content = raw.replace(tagLine, '').trim();
+		}
+
+		return { title, content, tags };
+	}
+	// ---------- Derived ----------
+	let parsed = $derived(parseMarkdown(raw));
+	let slug = $derived(slugify(parsed.title));
+	let html = $derived(snarkdown(raw));
+
+	// ---------- Auto save draft ----------
+	$effect(() => {
+		localStorage.setItem('draft', raw);
+	});
+
+	// ---------- Save ----------
 	async function savePost() {
-		if (!title || !slug || !content) return alert('กรุณากรอกข้อมูลให้ครบ');
-		
+		const { title, content, tags } = parsed;
+
+		if (!title || !content) {
+			return alert('ต้องมี # หัวข้อ และเนื้อหา');
+		}
+
 		isSaving = true;
+
 		const { error } = await supabase.from('posts').insert([
-			{ title, slug, content, version: '1.0.0' }
+			{
+				title,
+				slug,
+				content,
+				tags,
+				is_published: true,
+				version: '1.0.0'
+			}
 		]);
 
 		if (error) {
 			alert(error.message);
 		} else {
-			goto('/'); // บันทึกเสร็จแล้วกลับหน้าแรก
+			localStorage.removeItem('draft');
+			goto('/');
 		}
+
 		isSaving = false;
 	}
 </script>
 
-<div class="max-w-2xl mx-auto">
-	<h1 class="text-3xl font-bold mb-8">เขียนบทความใหม่</h1>
+<div class="mx-auto max-w-6xl p-6">
+	<h1 class="mb-6 text-3xl font-bold">เขียนบทความ (Markdown)</h1>
 
-	<div class="space-y-6 bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
-		<div>
-			<label for="title" class="block text-sm font-medium mb-2">หัวข้อ</label>
-			<input bind:value={title} id="title" type="text" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="ใส่ชื่อบทความ..." />
+	<div class="grid gap-6 md:grid-cols-2">
+		<!-- Editor -->
+		<div class="space-y-4">
+			<div class="rounded-2xl border bg-white p-6 shadow-sm">
+				<p class="mb-3 text-sm text-slate-500">
+					เริ่มด้วย <code># หัวข้อ</code>
+				</p>
+
+				<textarea
+					bind:value={raw}
+					rows="18"
+					class="w-full rounded-xl border px-4 py-3 font-mono outline-none focus:ring-2 focus:ring-blue-500"
+					placeholder={`# หัวข้อบทความ
+
+เริ่มเขียนเนื้อหาที่นี่...`}
+				/>
+			</div>
+
+			<!-- Meta -->
+			<div class="space-y-1 text-sm text-slate-600">
+				<p><b>Title:</b> {parsed.title || '-'}</p>
+				<p><b>Slug:</b> {slug || '-'}</p>
+			</div>
+
+			<button
+				onclick={savePost}
+				disabled={isSaving}
+				class="w-full rounded-xl bg-slate-900 py-3 font-bold text-white transition hover:bg-slate-800 disabled:bg-slate-400"
+			>
+				{isSaving ? 'กำลังบันทึก...' : 'เผยแพร่บทความ'}
+			</button>
 		</div>
 
-		<div>
-			<label for="slug" class="block text-sm font-medium mb-2">Slug (URL)</label>
-			<input bind:value={slug} id="slug" type="text" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="เช่น my-first-post" />
+		<!-- Preview -->
+		<div class="prose max-w-none rounded-2xl border bg-white p-6 shadow-sm">
+			{@html html}
 		</div>
-
-		<div>
-			<label for="content" class="block text-sm font-medium mb-2">เนื้อหา (Markdown)</label>
-			<textarea bind:value={content} id="content" rows="10" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="เริ่มเขียนเนื้อหาที่นี่..."></textarea>
-		</div>
-
-		<button 
-			onclick={savePost} 
-			disabled={isSaving}
-			class="w-full bg-slate-900 text-white py-3 rounded-lg font-bold hover:bg-slate-800 disabled:bg-slate-400 transition-colors"
-		>
-			{isSaving ? 'กำลังบันทึก...' : 'เผยแพร่บทความ'}
-		</button>
 	</div>
 </div>

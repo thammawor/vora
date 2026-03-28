@@ -4,10 +4,10 @@
 		post: {
 			title: string;
 			slug: string;
+			tags:string;
 			content: string;
 			created_at: string;
 			version: string;
-			axis_id: number;
 		}
 	}>();
 
@@ -44,15 +44,5 @@
 		<p class="text-slate-600 text-sm line-clamp-3 mb-6 flex-1">
 			{previewText}
 		</p>
-
-		<div class="flex items-center justify-between mt-auto pt-4 border-t border-slate-50">
-			<time class="text-xs text-slate-400">{formattedDate}</time>
-			
-			{#if post.axis_id}
-				<span class="text-[10px] font-medium text-blue-500 bg-blue-50 px-2 py-1 rounded-full">
-					กลุ่ม {post.axis_id}
-				</span>
-			{/if}
-		</div>
 	</div>
 </article>
